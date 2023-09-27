@@ -1,0 +1,38 @@
+FormatStyle: none
+HeaderFilterRegex: ''
+WarningsAsErrors: '*'
+Checks: >
+  bugprone-*,
+  cert-dcl21-cpp,
+  cert-dcl50-cpp,
+  cert-dcl58-cpp,
+  cert-env33-c,
+  cert-err33-c,
+  cert-err34-c,
+  cert-err52-cpp,
+  cert-err60-cpp,
+  cert-flp30-c,
+  cert-mem57-cpp,
+  cert-msc50-cpp,
+  cert-msc51-cpp,
+  cert-oop57-cpp,
+  cert-oop58-cpp,
+  clang-analyzer-*,
+  cppcoreguidelines-*,
+  hicpp-exception-baseclass,
+  hicpp-multiway-paths-covered,
+  hicpp-no-assembler,
+  misc-*,
+  modernize-*,
+  performance-*,
+  portability-*,
+  readability-*,
+  -google-*,
+  -fuchsia-*,
+  -zircon-*,
+  -abseil-*,
+  -llvm-*
+
+CheckOptions:
+  readability-identifier-naming.ClassCase: CamelCase
+  readability-identifier-naming.UnionCase: CamelCase
