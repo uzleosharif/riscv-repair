@@ -10,5 +10,8 @@ location so that this back-end (`MachineFunctionPass`) can be built and
 made available to be link against for the `llc` compiler. In other words,
 this project is not meant to be built as standalone library/application.
 
-- `CMMakeLists.txt` expects the `LLVM_PROJECT_DIR` variable to point to 
-`llvm-project` install location on your system.
+## Dependencies
+- Install `spdlog` library (>v1.12) somewhere in system paths as a shared 
+library. Ideally build this library using `clang++-17` compiler with 
+`-stdlib=libc++`.
+

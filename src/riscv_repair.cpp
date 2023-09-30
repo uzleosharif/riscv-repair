@@ -3,11 +3,13 @@
 
 #include "riscv_repair.hpp"
 
-#include <print>
+#include <spdlog/spdlog.h>
 
 namespace riscv::sihft {
 
-RepairPass::RepairPass() noexcept : llvm::MachineFunctionPass{kMfpId} {}
+RepairPass::RepairPass() noexcept : llvm::MachineFunctionPass{kMfpId} {
+  spdlog::set_level(spdlog::level::info);
+}
 
 auto RepairPass::getPassName() const noexcept -> llvm::StringRef {
   return "Repair Pass";
@@ -15,7 +17,7 @@ auto RepairPass::getPassName() const noexcept -> llvm::StringRef {
 
 auto RepairPass::runOnMachineFunction(llvm::MachineFunction& mfunction) noexcept
     -> bool {
-  std::println("Running RepairPass on MF");
+  spdlog::info("Running RepairPass on MF.");
 
   return true;
 }
