@@ -1,0 +1,73 @@
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+a0-a1 | a2-a7
+s0-s11
+sp, ra, zero, tp, gp
+t0-t6
+---------------------------
+
+a0-a7, zero, sp, ra, tp, gp, t0-t2 -> Primary Registers
+s0-s11, t3-t6 -> Shadow Registers
+
+t3-t6 could be clobbered by a non-DMR function
+
+
+// callee-saved registers (s0-s11) are fine
+
+// primary registers would be spilled by compiler automatically -> so try to 
+// get sx regs as shadow regs
+
+
+
+
+
+
+
+
+
+
+
+
+zero -> x0 -> 41 -> 0 -> t2 -> x7
+ra -> x1 -> 42 -> 1 -> s1 -> x9
+sp -> x2 -> 43 -> 2 -> s2 -> x18
+gp -> x3 -> 44 -> 3 -> s3 -> x19
+tp -> x4 -> 45 -> 4 -> s4 -> x20
+t0 -> x5 -> 46 -> 5 -> s5 -> x21
+t1 -> x6 -> 47 -> 6 -> s6 -> x22
+s0 -> x8 -> 48 -> 7 -> s7 -> x23
+a0 -> x10 -> 51 -> 8 -> s8 -> x24
+a1 -> x11 -> 52 -> 9 -> s9 -> x25
+a2 -> x12 -> 53 -> 10 -> s10 -> x26
+a3 -> x13 -> 54 -> 11 -> s11 -> x27
+a4 -> x14 -> 55 -> 12 -> t3 -> x28
+a5 -> x15 -> 56 -> 13 -> t4 -> x29
+a6 -> x16 -> 57 -> 14 -> t5 -> x30
+a7 -> x17 -> 58 -> 15 -> t6 -> x31
+
+
+
+
+
+
+
+
+
+
+// t3-t6 could be clobbered
+printf();
