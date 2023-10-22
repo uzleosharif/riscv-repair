@@ -1,0 +1,3 @@
+[submodule "test/mibench_spike"]
+	path = test/mibench_spike
+	url = git@github.com:uzleosharif/mibench.git
