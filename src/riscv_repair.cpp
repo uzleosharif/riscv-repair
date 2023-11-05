@@ -10,6 +10,7 @@
 
 #include "RISCVSubtarget.h"
 #include "llvm/CodeGen/MachineInstrBuilder.h"
+#include "llvm/Support/CommandLine.h"
 
 #include <spdlog/spdlog.h>
 
@@ -41,6 +42,8 @@ constexpr LogLevel kLogLevel{LogLevel::kDebug};
 consteval auto CanLogDebug() noexcept -> bool {
   return (kLogLevel == LogLevel::kDebug);
 }
+
+llvm::cl::opt<bool> g_disable_repair{"no-repair", llvm::cl::desc("Disable REPAIR transformation.")};
 
 }  // namespace
 
@@ -186,8 +189,11 @@ auto RepairPass::PostDuplicate() noexcept {
 // consider a new store has been inserted after Init() traversal then
 // you have to make sure it is inserted into cached stores container as well.
 
-auto RepairPass::runOnMachineFunction(MachineFunction& mfunction) noexcept
-    -> bool {
+auto RepairPass::runOnMachineFunction(MachineFunction& mfunction) noexcept -> bool {
+  if (g_disable_repair) {
+    return false;
+  }
+
   spdlog::info("Running RepairPass on MF: {}", mfunction.getName().str());
 
   // TODO(uzleo): monadic composition of function pipeline
