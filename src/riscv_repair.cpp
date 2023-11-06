@@ -18,6 +18,7 @@
 // TODO(uzleo): prefer minstr_it (moperand_it) over minstr (moperand)
 //              where possible using mbb.instrs()
 //              -> best to work with iterators for generic programming!!
+// TODO(uzleo): make sure for_each is making sense eveywhere
 
 // Implementation Notes:
 // -----------------------
@@ -38,6 +39,12 @@
 // This is ok assumption considering most of off-the-shelf memory
 // devices available are equipped with ECC protection. Hence, we don't
 // implement redundancy for memory data (as in EDDI).
+
+// NOTE: Currently, we opt for a simpler design that doesn't cache already
+// traversed program objects (e.g. cache all stores in a container). While
+// being inefficient, this makes maintaining code much simpler. For example,
+// consider a new store has been inserted after Init() traversal then
+// you have to make sure it is inserted into cached stores container as well.
 
 namespace {
 
@@ -68,6 +75,10 @@ auto InsertMoveInstruction(llvm::MachineBasicBlock& mbb, llvm::MachineBasicBlock
 }
 
 constexpr auto GetFunctionName(const llvm::MachineInstr& minstr) noexcept -> std::string {
+  if (not minstr.isCall()) {
+    spdlog::error("The passed in instruction is not a function-call.");
+  }
+
   return minstr.getOperand(0).getGlobal()->getName().str();
 }
 
@@ -109,36 +120,35 @@ auto RepairPass::Init(MachineFunction& mfunction) noexcept {
 
 //auto RepairPass::Duplicate() noexcept -> std::expected<void, std::string_view> {
 auto RepairPass::Duplicate() noexcept {
-
   auto mbb_transformer{[this](auto& mbb) {
     std::ranges::for_each(mbb.instrs() | std::views::filter([](MachineBasicBlock::const_iterator minstr_it) {
                             // TODO(uzleo): function-calls that should not be duplicated like fopen
                             return (not(minstr_it->isCFIInstruction() or minstr_it->isReturn() or
-                                        minstr_it->isBranch() or minstr_it->mayStore()));
+                                        minstr_it->isBranch() or minstr_it->mayStore() or minstr_it->isCall()));
                           }),
                           [this, &mbb](MachineBasicBlock::iterator minstr_it) {
                             auto* cloned_minstr{m_mfunction->get().CloneMachineInstr(&*minstr_it)};
 
                             // Transform all register-operands to shadow ones in cloned instruction.
-                            std::ranges::for_each(
-                                cloned_minstr->operands() | std::views::filter([](auto& moperand) {
-                                  if (not moperand.isReg()) {
-                                    return false;
-                                  }
-                                  //if (auto index{GetZeroBasedIndex(moperand.getReg())}; not index.has_value()) {
-                                  if (not kRegToIndex.contains(moperand.getReg())) {
-                                    spdlog::error("The register {} in moperand is not a primary register.",
-                                                  moperand.getReg());
-                                    return false;
-                                  }
+                            std::ranges::for_each(cloned_minstr->operands() | std::views::filter([](auto& moperand) {
+                                                    if (not moperand.isReg()) {
+                                                      return false;
+                                                    }
+                                                    //if (auto index{GetZeroBasedIndex(moperand.getReg())}; not index.has_value()) {
+                                                    if (not kRegToIndex.contains(moperand.getReg())) {
+                                                      spdlog::error(
+                                                          "The register {} in moperand is not a primary register.",
+                                                          moperand.getReg());
+                                                      return false;
+                                                    }
 
-                                  return true;
-                                }),
-                                [this](auto& moperand) {
-                                  // TODO(uzleo): apply repair transformation
+                                                    return true;
+                                                  }),
+                                                  [this](auto& moperand) {
+                                                    // TODO(uzleo): apply repair transformation
 
-                                  moperand.setReg(m_primary_to_shadow[kRegToIndex.at(moperand.getReg())]);
-                                });
+                                                    moperand.setReg(GetShadowFromPrimary(moperand.getReg()));
+                                                  });
 
                             mbb.insert(minstr_it, cloned_minstr);
                           });
@@ -154,8 +164,8 @@ auto RepairPass::PostDuplicate() noexcept {
   // (1) Within the entry basic-block, all live primary registers (e.g. SP etc.)
   // need to be copied into shadow counterparts.
 
-  InsertMoveInstruction(m_mfunction->get().front(), std::begin(m_mfunction->get().front()),
-                        m_primary_to_shadow[kRegToIndex.at(kSp)], kSp);
+  InsertMoveInstruction(m_mfunction->get().front(), std::begin(m_mfunction->get().front()), GetShadowFromPrimary(kSp),
+                        kSp);
   // The live-in of entry basic-block need to be moved into shadow counterparts.
   std::ranges::for_each(m_mfunction->get().front().liveins() | std::views::filter([](const auto& regmask_pair) {
                           if (not kRegToIndex.contains(static_cast<Register>(regmask_pair.PhysReg))) {
@@ -166,10 +176,9 @@ auto RepairPass::PostDuplicate() noexcept {
                           return true;
                         }),
                         [this](const auto& regmask_pair) {
-                          InsertMoveInstruction(
-                              m_mfunction->get().front(), std::begin(m_mfunction->get().front()),
-                              m_primary_to_shadow[kRegToIndex.at(static_cast<Register>(regmask_pair.PhysReg))],
-                              static_cast<Register>(regmask_pair.PhysReg));
+                          auto primary_reg{static_cast<Register>(regmask_pair.PhysReg)};
+                          InsertMoveInstruction(m_mfunction->get().front(), std::begin(m_mfunction->get().front()),
+                                                GetShadowFromPrimary(primary_reg), primary_reg);
                         });
 
   // (2) Before calling function that are not protected, we have to save context.
@@ -178,41 +187,50 @@ auto RepairPass::PostDuplicate() noexcept {
   // scheme, only t2-t6 need to be spilled (if they are live and if their current
   // shadow is callee-saved reg) as are risk of being clobbered by non-DMR function.
 
-  // (3) Setting context before going into a non-DMR function.
-  // TODO(uzleo): constness of instr!!
+  // - (2a) for unprotected function-calls that will not be duplicated:
+  auto function_calls{CollectFunctionCalls()};
+  std::ranges::for_each(CollectFunctionCalls() | std::views::filter([](auto const& function_call) {
+                          auto function_name{GetFunctionName(function_call)};
+                          return (kUnprotectedFunctionCalls.contains(function_name) and
+                                  kUnprotectedFunctionCalls.at(function_name) == FunctionCallProtectionStrategy::kNone);
+                        }),
+                        [this](auto const& function_call) {
+                          MachineBasicBlock::const_iterator function_call_cit{function_call.get().getIterator()};
 
-  auto functioncall_livein_filter{[](const auto& moperand) {
-    return (moperand.isReg() and moperand.isImplicit() and moperand.isUse());
-  }};
+                          // TODO(uzleo): For simplicity we just blindly copy over all return registers.
+                          // For performance, only live return registers should have been copied.
+                          std::array<llvm::Register, 2> return_registers{RISCV::X10, RISCV::X11};
 
-  auto mbb_transformer{[this, &functioncall_livein_filter](auto& mbb) {
-    std::ranges::for_each(mbb.instrs() | std::views::filter([&functioncall_livein_filter](auto& minstr) {
-                            if (minstr.isCall() and kUnprotectedFunctionCalls.contains(GetFunctionName(minstr)) and
-                                not IsShadowInstruction(minstr)) {
-
-                              return std::ranges::any_of(minstr.operands(), functioncall_livein_filter);
-                            }
-
-                            return false;
-                          }),
-                          [this, &mbb, &functioncall_livein_filter](auto& minstr) {
-                            std::ranges::for_each(minstr.operands() | std::views::filter(functioncall_livein_filter),
-                                                  [this, &mbb, &minstr](const auto& moperand) {
-                                                    InsertMoveInstruction(
-                                                        mbb, minstr.getIterator(), moperand.getReg(),
-                                                        m_primary_to_shadow[kRegToIndex.at(moperand.getReg())]);
-                                                  });
-                          });
-  }};
-
-  std::ranges::for_each(m_mfunction->get(), mbb_transformer);
+                          std::ranges::for_each(
+                              return_registers, [&function_call, &function_call_cit, this](auto const& return_reg) {
+                                InsertMoveInstruction(GetNonConstMbb(*function_call.get().getParent()),
+                                                      std::next(function_call_cit.getNonConstIterator()),
+                                                      GetShadowFromPrimary(return_reg), return_reg);
+                              });
+                        });
 }
 
-// NOTE: Currently, we opt for a simpler design that doesn't cache already
-// traversed program objects (e.g. cache all stores in a container). While
-// being inefficient, this makes maintaining code much simpler. For example,
-// consider a new store has been inserted after Init() traversal then
-// you have to make sure it is inserted into cached stores container as well.
+constexpr auto RepairPass::CollectFunctionCalls() const noexcept
+    -> std::vector<std::reference_wrapper<const MachineInstr>> {
+  std::vector<std::reference_wrapper<const MachineInstr>> function_calls{};
+
+  std::ranges::for_each(m_mfunction->get(), [&function_calls](auto const& mbb) {
+    std::ranges::for_each(mbb.instrs() | std::views::filter([](auto const& minstr) { return minstr.isCall(); }),
+                          [&function_calls](auto const& minstr) { function_calls.push_back(minstr); });
+  });
+
+  return function_calls;
+}
+
+constexpr auto RepairPass::GetShadowFromPrimary(Register primary_reg) const noexcept -> Register {
+  return m_primary_to_shadow.at(kRegToIndex.at(primary_reg));
+}
+
+constexpr auto RepairPass::GetNonConstMbb(const MachineBasicBlock& cmbb) const noexcept -> MachineBasicBlock& {
+  auto result_mbb_it =
+      std::ranges::find_if(m_mfunction->get(), [&cmbb](auto& mbb) { return (mbb.getNumber() == cmbb.getNumber()); });
+  return *result_mbb_it;
+}
 
 auto RepairPass::runOnMachineFunction(MachineFunction& mfunction) noexcept -> bool {
   if (sDisableRepair) {

@@ -59,6 +59,10 @@ class RepairPass : public MachineFunctionPass {
   auto Init(MachineFunction& mfunction) noexcept;
   auto Duplicate() noexcept;
   auto PostDuplicate() noexcept;
+  [[nodiscard]] constexpr auto CollectFunctionCalls() const noexcept
+      -> std::vector<std::reference_wrapper<const MachineInstr>>;
+  [[nodiscard]] constexpr auto GetNonConstMbb(const MachineBasicBlock& mbb) const noexcept -> MachineBasicBlock&;
+  [[nodiscard]] constexpr auto GetShadowFromPrimary(Register primary_reg) const noexcept -> Register;
 
   std::unique_ptr<std::reference_wrapper<MachineFunction>> m_mfunction{nullptr};
   std::array<Register, kNumGprRegsHalf> m_primary_to_shadow{kShadowRegs};
